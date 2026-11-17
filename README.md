@@ -1,60 +1,81 @@
 # LOW TIDE — Solara Bay
 
-[![make.fun gta6-01](https://img.shields.io/badge/make.fun-gta6--01-ffb03a)](https://make.fun/c/gta6-01)
+An original open-world crime game for make.fun's **gta6-01** bounty ("Make GTA 6").
+Vanilla JavaScript + Canvas 2D, no libraries, no network — the whole game is static
+files under `game/` and plays offline in desktop Chrome.
 
-An original open-world crime game that runs offline in a desktop browser from its
-own static files. No Rockstar assets, names or characters — Solara Bay, Mara Velez
-and every street are invented for this game.
+Mara Velez came back to Solara Bay with nothing but a name to clear. Explore the
+city on foot or by car, take on three jobs for her fixer Rook, and stay ahead of the
+Solara Bay PD.
 
-## Play
+## What is in the game
 
-Serve `game/` with any static server and open `game/index.html`, for example:
-
-```sh
-node serve.ts   # serves game/ on http://localhost:8080
-```
-
-## The game
-
-Mara Velez, a disgraced harbour pilot, comes home to Solara Bay to find her
-brother — and gets pulled into a fight over the city's smuggling routes.
-
-- **Open city** — drive and walk a 4800×3600 sun-soaked coastal city: avenues,
-  parks, a beach and the marina, with day/night light and headlights after dark.
-- **Traffic & pedestrians** — cars follow the road grid and brake for each other;
-  pedestrians stroll the sidewalks and run from gunfire.
-- **Steal cars** — walk up to any car, press **E**, pull the driver out and drive.
-- **Wanted level** — crimes raise 0–5 stars; Solara Bay police cruisers chase,
-  ram and shoot back. Break line of sight and stay quiet to cool off.
-- **Missions & story** — three chained missions: *First Tide* (a pickup for
-  Rico), *Hot Pursuit* (stop the courier van), *The Big Haul* (the marina
-  warehouse heist). Cash stashes and weapon pickups are hidden around the city.
-- **Combat** — fists, pistol and SMG, mouse aim, with police and pedestrians
-  reacting to every shot.
-- **HUD & minimap** — money, health, wanted stars, weapon and ammo, speed,
-  clock, street name, objective marker and a live minimap.
-- **Save** — progress autosaves; **Continue** on the title screen picks up
-  where you left off (localStorage).
+- **A city to explore** — Solara Bay is 4800×3600: eight avenues, eight streets, a
+  plaza, an old fort, harbor docks, a marina, a hospital and a police HQ, plus a beach
+  and open water along the east and south edges. Day turns to night; car headlights
+  and street lamps come on after dark.
+- **On foot and by car** — walk, run, get in any parked car, or steal a moving one
+  (the driver gets pulled out, and the police will notice).
+- **Traffic and pedestrians** — cars drive the road grid, yield at intersections and
+  queue behind each other; pedestrians stroll the sidewalks and run from gunfire.
+- **Wanted level** — 0 to 5 stars. Police cars chase and ram, officers on foot try
+  to arrest you, and roadblocks go up at three stars. Lay low and the heat fades.
+- **Missions and a story** — three chained jobs for Rook: *First Tide* ($500),
+  *Hot Pursuit* ($900) and *The Big Haul* ($2,000), with a vault hold-out and an
+  escape in the middle.
+- **Combat** — fists, pistol and SMG, with ammo, muzzle flash and enemy guards who
+  shoot back. Cars explode when their health runs out.
+- **HUD and minimap** — money, health, wanted stars, weapon and ammo, speed, clock,
+  street name, mission objective with distance, and a live minimap.
+- **Start screen and save** — New Game / Continue / How to Play, autosave to
+  localStorage, and a save on pause, mission complete, death or arrest.
+- **Sound** — synthesised with WebAudio: engine hum, two-tone sirens, shots,
+  pickups and mission jingles. `M` mutes.
 
 ## Controls
 
 | Key | Action |
 | --- | --- |
-| W A S D / arrows | Move on foot / drive (W throttle, S brake/reverse, A/D steer) |
-| Shift | Sprint on foot |
-| Mouse | Aim |
+| WASD / Arrows | Move / drive (Shift to run) |
+| Mouse | Aim (on foot) |
 | Click | Shoot / punch |
-| E | Steal nearest car / exit car |
+| E | Enter, exit or steal a car |
 | Q | Switch weapon |
 | P / Esc | Pause |
 | M | Mute |
 
-## Screenshots
+## Play it
 
-`?shot=start|play|chase|end&seed=1` stages a deterministic scene rendered by the
-game itself (title, street driving, police chase, story complete) — see
-`shots.json`.
+```sh
+node serve.ts
+# open http://localhost:8080
+```
+
+Or open `game/index.html` from any static file server. `?shot=start|play|chase|end&seed=1`
+stages a deterministic screenshot scene instead of the title screen.
+
+## Layout
+
+```
+game/
+  index.html        the page (loads src/main.js)
+  src/
+    config.js       tuning, names, colours, missions
+    random.js       seeded generator
+    city.js         the map: roads, blocks, landmarks, queries
+    world.js        the simulation: player, cars, combat, pickups
+    traffic.js      AI cars and pedestrians
+    police.js       wanted response, pursuit, roadblocks, arrests
+    missions.js     the three-job story state machine
+    render.js       canvas drawing, HUD, minimap, menus
+    audio.js        WebAudio sound effects
+    save.js         localStorage save / load
+    input.js        keyboard and pointer input
+    shots.js        deterministic screenshot scenes
+    main.js         boot, the fixed-step loop, screens
+```
 
 ## License
 
-MIT — see `LICENSE`.
+MIT — see `LICENSE`. Every name, character, place and story beat is original;
+nothing is taken from Rockstar Games or any other commercial game.

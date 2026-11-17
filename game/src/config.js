@@ -1,92 +1,142 @@
-// LOW TIDE — Solara Bay. Every tuning number and colour in one place.
-// The world is a fixed 4800x3600 open city; the camera follows the player and the
-// renderer scales to the window, so no rule below depends on the screen size.
+// LOW TIDE — Solara Bay. Every tuning number, name and colour in one place, so the
+// rest of the game never hard-codes a magic value. The city is a fixed 4800 by 3600
+// world; the renderer shows a 1280 by 720 window of it, scaled to the browser.
 
-export const STEP = 1 / 60;
 export const WORLD = { width: 4800, height: 3600 };
 
-/** Road centrelines: vertical avenues and horizontal streets, 100 px wide. */
-export const ROADS = {
-  width: 100,
-  vertical: [300, 900, 1500, 2100, 2700, 3300, 3900, 4500],
-  horizontal: [300, 900, 1500, 2100, 2700, 3300],
-};
+/** The simulation's fixed step, in seconds: 60 updates a second whatever the display's rate. */
+export const STEP = 1 / 60;
 
-export const STREET_NAMES = {
-  vertical: ['Palma Ave', 'Coral Blvd', 'Heron St', 'Marina Way', 'Sol St', 'Lagoon Rd', 'Pier Ave', 'Sunset Dr'],
-  horizontal: ['Bayfront St', 'Tide St', 'Gull St', 'Anchor Rd', 'Breeze Ave', 'Harbor Ln'],
-};
+/** The logical window the renderer paints; it is scaled to fit the real canvas. */
+export const VIEW = { width: 1280, height: 720 };
+
+/** Where a save lives between visits (this browser only). */
+export const SAVE_KEY = 'lowtide.save.v1';
 
 export const PLAYER = {
   radius: 13,
-  walkSpeed: 210,
-  runSpeed: 300,
-  health: 100,
-  punchDamage: 12,
-  punchRange: 34,
-  punchArc: 1.1,
+  walkSpeed: 265,
+  runSpeed: 345,
+  hp: 100,
+  /** Seconds of mercy after any hit, so a crash or a beating can never kill in one frame. */
+  hurtCooldown: 0.9,
+  /** Seconds a police officer must stay touching the player on foot to make the arrest. */
+  arrestTime: 1.2,
+  stealRange: 78,
+  pickupRange: 30,
 };
 
 export const CAR = {
-  length: 54,
-  width: 26,
-  accel: 420,
-  brake: 700,
-  reverseAccel: 260,
-  maxSpeed: 460,
-  maxReverse: 160,
-  steer: 2.6,
-  grip: 3.2,
-  health: 100,
-};
-
-export const TRAFFIC = { count: 26, speedMin: 130, speedMax: 210, gap: 78, turnChance: 0.22 };
-export const PEDS = { count: 46, speedMin: 34, speedMax: 62 };
-
-export const WANTED = {
-  maxStars: 5,
-  decayQuietSeconds: 18,
-  decayStepSeconds: 7,
-  copSpeed: 430,
-  maxCops: 6,
-  /** Heat points added by each crime; stars are heat bands. */
-  heat: { stealCar: 25, killPed: 30, shoot: 8, killCop: 45, ramCop: 15, missionHeat: 40 },
-  starAt: [0, 20, 45, 75, 110, 150],
+  length: 66,
+  width: 30,
+  accel: 430,
+  brake: 760,
+  reverseMax: 170,
+  /** Top speed of the fastest street car, in world units a second. */
+  maxSpeed: 580,
+  turnRate: 2.7,
+  /** How fast the velocity vector is pulled toward the car's heading (the drift feel). */
+  grip: 5.2,
+  hp: 100,
 };
 
 export const WEAPONS = {
-  fists: { name: 'Fists', damage: 12, range: 34, rate: 0.32, auto: false },
-  pistol: { name: 'P9 Pistol', damage: 26, range: 460, rate: 0.22, auto: false, bulletSpeed: 900, mag: 12 },
-  smg: { name: 'Stinger SMG', damage: 14, range: 380, rate: 0.08, auto: true, bulletSpeed: 950, mag: 30 },
+  fists: { name: 'Fists', damage: 14, range: 42, rate: 0.34, bulletSpeed: 0, spread: 0, auto: false },
+  pistol: { name: 'Pistol', damage: 26, range: 460, rate: 0.27, bulletSpeed: 980, spread: 0.02, auto: false, startAmmo: 36 },
+  smg: { name: 'SMG', damage: 13, range: 400, rate: 0.085, bulletSpeed: 1050, spread: 0.06, auto: true, startAmmo: 120 },
+};
+export const WEAPON_ORDER = ['fists', 'pistol', 'smg'];
+
+export const WANTED = {
+  maxStars: 5,
+  heatPerStar: 25,
+  stealHeat: 15,
+  killPedHeat: 25,
+  killCopHeat: 40,
+  shotHeat: 4,
+  /** Seconds of quiet before the heat starts to fall. */
+  decayDelay: 12,
+  decayRate: 2.5,
 };
 
-export const MONEY = { start: 120, mission1: 500, mission2: 900, mission3: 2000, stash: 150, fare: 80 };
+export const MISSIONS = [
+  {
+    id: 'first-tide',
+    name: 'First Tide',
+    payout: 500,
+    giver: 'Rook',
+    brief: 'Rook needs a package lifted off the Harbor Docks and brought to the hideout. No noise, no witnesses.',
+    target: { x: 450, y: 3225, label: 'Harbor Docks' },
+    deliver: { x: 600, y: 2325, label: 'Hideout' },
+  },
+  {
+    id: 'hot-pursuit',
+    name: 'Hot Pursuit',
+    payout: 900,
+    giver: 'Rook',
+    brief: 'The pickup was tagged. Solara Bay PD is on you — three stars and climbing. Break away to the Old Fort, then lose them and reach the hideout.',
+    flee: { x: 2400, y: 525, label: 'Old Fort' },
+    target: { x: 600, y: 2325, label: 'Hideout' },
+    escapeSeconds: 90,
+  },
+  {
+    id: 'big-haul',
+    name: 'The Big Haul',
+    payout: 2000,
+    giver: 'Rook',
+    brief: 'One last job: hold the Marina vault for twenty seconds while the crew cracks it, then run the cash home.',
+    target: { x: 4200, y: 975, label: 'Marina Vault' },
+    holdSeconds: 20,
+    deliver: { x: 600, y: 2325, label: 'Hideout' },
+  },
+];
 
-export const DAY_LENGTH = 360; // seconds of play per full day/night cycle
+/** How many of each thing can exist at once; the pools are allocated once, at boot. */
+export const POOLS = { cars: 40, peds: 48, bullets: 96, particles: 320, pickups: 14 };
+
+export const CLOCK = { startMinutes: 8 * 60, minutesPerSecond: 0.5, nightStart: 19 * 60, nightEnd: 6 * 60 };
 
 export const PALETTE = {
-  skyDay: '#7ec8e3',
-  skyNight: '#0d1b2e',
-  grass: '#5da24a',
-  park: '#4c8f3e',
-  sand: '#e8d29a',
-  water: '#2e7fa8',
-  road: '#3a3f47',
-  roadLine: '#e8d44d',
-  sidewalk: '#b8b0a0',
-  buildingRoof: ['#c96f4a', '#d9a05b', '#7fa8a0', '#b5533c', '#e0cfa8', '#8a6f9e', '#5b7fa6', '#d98a7a'],
-  buildingWall: ['#e8dcc8', '#f2e6d0', '#d9c8a8', '#cbb8a0'],
-  carColors: ['#d94f3d', '#3d7fd9', '#e8c33d', '#4caf6d', '#e8e8e8', '#2b2b30', '#c97bb8', '#e07b2e', '#7fb3d9', '#8a5a2e'],
-  player: '#f2c94c',
-  cop: '#2b4fd9',
-  hud: '#101820',
-  text: '#f4f1e8',
-  muted: '#a8b0b8',
-  accent: '#ffb03a',
-  danger: '#e5534b',
-  good: '#6fce62',
+  backdrop: '#0e1420',
+  grass: '#6f9e57',
+  grassDark: '#5d8a4a',
+  park: '#4f7d43',
+  sand: '#e3cd96',
+  water: '#2b7d9c',
+  waterDeep: '#1f5f7d',
+  road: '#3a3e46',
+  roadEdge: '#2c2f36',
+  sidewalk: '#8f959e',
+  lane: '#e6dfc2',
+  plaza: '#c9b183',
+  buildingRoof: '#4a4f58',
+  panel: 'rgba(13, 18, 28, 0.88)',
+  panelEdge: '#f2c230',
+  text: '#f4f1e4',
+  muted: '#9aa3ad',
+  gold: '#f2c230',
+  player: '#e85d3d',
+  playerDark: '#7a2d1d',
+  police: '#3d7bd6',
+  policeDark: '#1d3f7a',
+  taxi: '#f2c230',
+  health: '#58c96b',
+  healthLow: '#e5534b',
+  wanted: '#ff5a4e',
+  mission: '#ffd94d',
+  night: 'rgba(8, 14, 38, 0.42)',
+  dusk: 'rgba(64, 32, 64, 0.18)',
+  headlight: 'rgba(255, 236, 160, 0.16)',
 };
 
-export const FONT = 'system-ui, -apple-system, "Segoe UI", sans-serif';
+/** A few car paint jobs, picked per car at spawn. */
+export const CAR_COLORS = ['#c94f43', '#4f7ec9', '#e8e4d2', '#3f3f46', '#7fb069', '#d9a441', '#8a6fc9', '#5bc0be'];
 
-export const SAVE_KEY = 'lowtide.solara.save.v1';
+/** Pedestrian shirt colours, picked per pedestrian at spawn. */
+export const PED_COLORS = ['#e8b4b8', '#a8c686', '#f2d398', '#9db8d2', '#d2a679', '#b8a8d2', '#8fc1b5', '#e0e0e0'];
+
+/** The avenues run north-south, the streets east-west. */
+export const AVENUES = ['Harbor Ave', 'Coral Ave', 'Palmetto Ave', 'Solara Ave', 'Bayview Ave', 'Tidepool Ave', 'Marina Ave', 'Sunset Ave'];
+export const STREETS = ['North Shore St', 'Pelican St', 'Tradewind St', 'Plaza St', 'Juniper St', 'Lagoon St', 'Boardwalk St', 'South Beach St'];
+
+export const FONT = 'system-ui, -apple-system, "Segoe UI", sans-serif';

@@ -1,29 +1,28 @@
-// Boot and the one loop: input is read every frame, the world advances in fixed
-// 1/60 s steps (several in a slow frame, none in a fast one), and the renderer paints
-// what is there. The game moves between five screens: title, play, paused, game over
-// and story complete. Progress autosaves while playing.
-//
-// ?seed=N fixes the city. ?shot=start|play|chase|end (with &seed=N) stages that scene
-// instead of running the loop, paints it twice and sets window.__shotReady.
+// Boot and the one loop: input is read every frame, the world advances in fixed 1/60 s
+// steps (several in a slow frame, none in a fast one), and the renderer paints what is
+// there. The game moves between six screens: title, help, play, paused, wasted and
+// busted. ?seed=N fixes the city. ?shot=start|play|chase|end (with &seed=N) stages that
+// scene instead of running the loop, paints it twice and sets window.__shotReady.
 
 import { STEP } from './config.js';
 import { createRandom } from './random.js';
 import {
-  EVENT_GAMEOVER, EVENT_MISSION_DONE, EVENT_STORY_DONE,
-  createWorld, resetWorld, respawn, stepWorld,
+  EVENT_BUSTED, EVENT_CRASH, EVENT_DIED, EVENT_MISSION, EVENT_PICKUP, EVENT_SHOT, createWorld,
 } from './world.js';
-import { ACTION_CONFIRM, ACTION_ENTER, ACTION_MUTE, ACTION_PAUSE, ACTION_WEAPON, createInput } from './input.js';
-import { createRenderer, SCREEN_OVER, SCREEN_PAUSED, SCREEN_PLAY, SCREEN_STORY, SCREEN_TITLE } from './render.js';
-import { stageShot } from './shots.js';
+import {
+  ACTION_CONFIRM, ACTION_INTERACT, ACTION_MENU_DOWN, ACTION_MENU_UP, ACTION_MUTE,
+  ACTION_PAUSE, ACTION_WEAPON, createInput,
+} from './input.js';
+import {
+  SCREEN_BUSTED, SCREEN_HELP, SCREEN_OVER, SCREEN_PAUSED, SCREEN_PLAY, SCREEN_TITLE, createRenderer,
+} from './render.js';
 import { createAudio } from './audio.js';
-import { applySave, clearSave, hasSave, loadSave, saveGame } from './save.js';
-import { MISSION_NAMES } from './missions.js';
+import { applySave, hasSave, loadSave, saveGame } from './save.js';
+import { stageShot } from './shots.js';
 
+/** The longest frame the loop catches up on; a longer stall is dropped, not replayed. */
 const MAX_FRAME = 0.25;
-const AUTOSAVE_SECONDS = 10;
-const VIEW_W = 1280;
-const VIEW_H = 720;
-const IDLE = { mx: 0, my: 0, aimX: 0, aimY: 0, fire: false, enterPressed: false, weaponPressed: false, sprint: false };
+const AUTOSAVE_EVERY = 30;
 
 const params = new URLSearchParams(window.location.search);
 const shot = params.get('shot');
@@ -34,235 +33,165 @@ const canvas = document.getElementById('game');
 const status = document.getElementById('status');
 const world = createWorld(createRandom(seed));
 const renderer = createRenderer(canvas);
+const input = createInput(canvas);
 const audio = createAudio();
 
-function runShot(name) {
-  const scene = stageShot(name, world);
-  let painted = 0;
-  function paint() {
-    renderer.draw(world, scene.screen, { time: world.time, banner: scene.banner, hasSave: false, menuIndex: 0 });
-    painted += 1;
-    if (painted < 2) requestAnimationFrame(paint);
-    else window.__shotReady = true;
-  }
-  requestAnimationFrame(paint);
+let screen = SCREEN_TITLE;
+let menuIndex = 0;
+let saveExists = hasSave();
+let muted = false;
+let autosaveT = AUTOSAVE_EVERY;
+let prevMouseDown = false;
+let lastTime = performance.now();
+let accumulator = 0;
+
+function menuItems() {
+  return ['New Game', saveExists ? 'Continue' : null, 'How to Play'].filter(Boolean);
 }
 
-function runGame() {
-  const input = createInput(canvas);
-  let screen = SCREEN_TITLE;
-  let menuIndex = 0;
-  let accumulator = 0;
-  let last = performance.now();
-  let saveTimer = 0;
-  let banner = null;
-  let bannerTimer = 0;
-  let pendingActions = 0;
-
-  const saved = loadSave();
-  const menuItems = () => (saved ? ['new', 'continue', 'howto'] : ['new', 'howto']);
-
-  function announce(message) {
-    status.textContent = message;
+function setScreen(next) {
+  screen = next;
+  if (status) {
+    status.textContent = next === SCREEN_TITLE
+      ? 'Low Tide, Solara Bay. Press Enter to start.'
+      : next === SCREEN_PLAY ? 'Playing Low Tide.' : next;
   }
+}
 
-  function menuLabel(item) {
-    if (item === 'new') return '▶  NEW GAME';
-    if (item === 'continue') {
-      const m = saved.missionIndex >= MISSION_NAMES.length ? 'Story complete' : MISSION_NAMES[saved.missionIndex];
-      return `↻  CONTINUE — $${saved.money}  •  ${m}`;
-    }
-    return 'HOW TO PLAY';
+function selectMenu() {
+  const item = menuItems()[menuIndex];
+  audio.ensure();
+  audio.click();
+  if (item === 'New Game') {
+    world.reset();
+    saveGame(world);
+    saveExists = true;
+    setScreen(SCREEN_PLAY);
+  } else if (item === 'Continue') {
+    const data = loadSave();
+    world.reset();
+    if (data) applySave(world, data);
+    setScreen(SCREEN_PLAY);
+  } else if (item === 'How to Play') {
+    setScreen(SCREEN_HELP);
   }
+}
 
-  function startNew() {
-    clearSave();
-    resetWorld(world);
-    screen = SCREEN_PLAY;
-    announce('Playing. Follow the yellow marker to Rico.');
+function handleActions(actions) {
+  if (actions & ACTION_MUTE) {
+    muted = !muted;
+    audio.setMuted(muted);
   }
-
-  function startContinue() {
-    resetWorld(world);
-    applySave(world, saved);
-    if (saved.missionIndex >= MISSION_NAMES.length) {
-      world.mission.objective = 'Story complete — Solara Bay is yours.';
-    }
-    screen = SCREEN_PLAY;
-    announce('Continuing your game in Solara Bay.');
+  if (screen === SCREEN_TITLE) {
+    const count = menuItems().length;
+    if (actions & ACTION_MENU_UP) menuIndex = (menuIndex - 1 + count) % count;
+    if (actions & ACTION_MENU_DOWN) menuIndex = (menuIndex + 1) % count;
+    if (actions & ACTION_CONFIRM) selectMenu();
+    return;
   }
-
-  function chooseMenu() {
-    const item = menuItems()[menuIndex];
-    if (item === 'new') startNew();
-    else if (item === 'continue') startContinue();
-    else {
-      announce('WASD to move and drive. Mouse to aim. Click to shoot or punch. E to steal or exit a car. Q to switch weapon. P to pause.');
-    }
+  if (screen === SCREEN_HELP) {
+    if (actions & ACTION_CONFIRM) setScreen(SCREEN_TITLE);
+    return;
   }
-
-  /** Convert the mouse's CSS-pixel position to world coordinates. */
-  function mouseToWorld() {
-    const rect = canvas.getBoundingClientRect();
-    const mouse = input.mouse();
-    const scale = Math.min(rect.width / VIEW_W, rect.height / VIEW_H);
-    const ox = (rect.width - VIEW_W * scale) / 2;
-    const oy = (rect.height - VIEW_H * scale) / 2;
-    return {
-      x: world.camera.x - VIEW_W / 2 + (mouse.x - ox) / scale,
-      y: world.camera.y - VIEW_H / 2 + (mouse.y - oy) / scale,
-    };
-  }
-
-  function controls() {
-    const move = input.movement();
-    const aim = mouseToWorld();
-    return {
-      mx: move.mx,
-      my: move.my,
-      aimX: aim.x,
-      aimY: aim.y,
-      fire: input.mouse().down,
-      enterPressed: false,
-      weaponPressed: false,
-      sprint: input.sprint(),
-    };
-  }
-
-  function handleActions() {
-    const actions = input.takeActions();
-    if (actions & ACTION_MUTE) {
-      const muted = audio.toggleMute();
-      announce(muted ? 'Sound muted.' : 'Sound on.');
-    }
-    if (screen === SCREEN_TITLE) {
-      if (actions & ACTION_CONFIRM) chooseMenu();
-      return;
-    }
-    if (screen === SCREEN_OVER) {
-      if (actions & ACTION_CONFIRM) {
-        respawn(world);
-        screen = SCREEN_PLAY;
-        announce('You wake up at the hospital. The mission restarts.');
-      }
-      return;
-    }
-    if (screen === SCREEN_STORY) {
-      if (actions & ACTION_CONFIRM) {
-        screen = SCREEN_PLAY;
-        announce('Free roam — Solara Bay is yours.');
-      }
-      return;
-    }
+  if (screen === SCREEN_PLAY) {
     if (actions & ACTION_PAUSE) {
-      if (screen === SCREEN_PLAY) {
-        screen = SCREEN_PAUSED;
-        saveGame(world);
-        announce('Paused. Progress saved.');
-      } else if (screen === SCREEN_PAUSED) {
-        screen = SCREEN_PLAY;
-        announce('Playing.');
-      }
-      return;
+      saveGame(world);
+      setScreen(SCREEN_PAUSED);
     }
-    if (screen !== SCREEN_PLAY) return;
-    pendingActions |= actions;
+    return;
   }
-
-  function step() {
-    const c = controls();
-    c.enterPressed = Boolean(pendingActions & ACTION_ENTER);
-    c.weaponPressed = Boolean(pendingActions & ACTION_WEAPON);
-    pendingActions = 0;
-    const beforeAmmo = world.player.magAmmo;
-    const beforePunch = world.player.punchCooldown;
-    const events = stepWorld(world, c, STEP);
-    if (world.player.magAmmo < beforeAmmo) audio.gunshot();
-    if (world.player.punchCooldown > beforePunch) audio.punch();
-    if (events & EVENT_MISSION_DONE) {
-      banner = 'MISSION COMPLETE';
-      bannerTimer = 4;
-      audio.missionDone();
-      saveGame(world);
-    }
-    if (events & EVENT_STORY_DONE) {
-      screen = SCREEN_STORY;
-      audio.missionDone();
-      saveGame(world);
-      announce('Story complete! Solara Bay is yours.');
-    } else if (events & EVENT_GAMEOVER) {
-      screen = SCREEN_OVER;
-      audio.gameOver();
-      announce(world.busted ? 'Busted!' : 'Wasted!');
-    }
-    if (bannerTimer > 0) {
-      bannerTimer -= STEP;
-      if (bannerTimer <= 0) banner = null;
-    }
-    saveTimer += STEP;
-    if (saveTimer >= AUTOSAVE_SECONDS) {
-      saveTimer = 0;
-      saveGame(world);
-    }
-    const speed = world.player.inCar ? Math.abs(world.player.inCar.speed) : 0;
-    audio.update(speed, world.wanted.stars);
+  if (screen === SCREEN_PAUSED) {
+    if (actions & ACTION_PAUSE || actions & ACTION_CONFIRM) setScreen(SCREEN_PLAY);
+    return;
   }
-
-  function frame(now) {
-    requestAnimationFrame(frame);
-    accumulator += Math.min((now - last) / 1000, MAX_FRAME);
-    last = now;
-    handleActions();
-    if (screen === SCREEN_PLAY) {
-      while (accumulator >= STEP) {
-        step();
-        accumulator -= STEP;
-        if (screen !== SCREEN_PLAY) break;
-      }
-    } else {
-      if (screen === SCREEN_TITLE) {
-        // Attract mode: the city lives behind the title, one step a frame.
-        stepWorld(world, IDLE, STEP);
-      }
-      accumulator = 0;
-    }
-    const ui = {
-      time: world.time,
-      banner,
-      hasSave: hasSave(),
-      saveMoney: saved ? saved.money : 0,
-      saveMission: saved ? (saved.missionIndex >= MISSION_NAMES.length ? 'Story complete' : MISSION_NAMES[saved.missionIndex]) : '',
-      menuIndex,
-      menuLabel,
-    };
-    renderer.draw(world, screen, ui);
-  }
-
-  // Arrow keys move the title menu; any key unlocks audio on first gesture.
-  window.addEventListener('keydown', (event) => {
-    audio.unlock();
-    if (screen !== SCREEN_TITLE) return;
-    if (event.code === 'ArrowUp' || event.code === 'KeyW') {
-      menuIndex = (menuIndex + menuItems().length - 1) % menuItems().length;
-      event.preventDefault();
-    } else if (event.code === 'ArrowDown' || event.code === 'KeyS') {
-      menuIndex = (menuIndex + 1) % menuItems().length;
-      event.preventDefault();
-    }
-  });
-  canvas.addEventListener('pointerdown', () => audio.unlock());
-
-  document.addEventListener('visibilitychange', () => {
-    if (document.hidden && screen === SCREEN_PLAY) {
-      screen = SCREEN_PAUSED;
+  if (screen === SCREEN_OVER || screen === SCREEN_BUSTED) {
+    if (actions & ACTION_CONFIRM) {
+      world.respawn();
       saveGame(world);
-      announce('Paused.');
+      setScreen(SCREEN_PLAY);
     }
-  });
-
-  announce('LOW TIDE — Solara Bay. Press Space or click to play.');
-  requestAnimationFrame(frame);
+  }
 }
 
-if (shot) runShot(shot);
-else runGame();
+function buildGameInput(actions) {
+  const move = input.move();
+  const aim = renderer.toWorld(input.mouse.x, input.mouse.y, world.state.camera);
+  const firePressed = input.mouse.down && !prevMouseDown;
+  prevMouseDown = input.mouse.down;
+  const aimMoved = input.mouse.moved;
+  input.mouse.moved = false;
+  return {
+    moveX: move.x,
+    moveY: move.y,
+    up: input.held.up,
+    down: input.held.down,
+    left: input.held.left,
+    right: input.held.right,
+    run: input.held.run,
+    interact: !!(actions & ACTION_INTERACT),
+    fire: input.mouse.down,
+    firePressed,
+    aimX: aim.x,
+    aimY: aim.y,
+    aimMoved,
+    cycleWeapon: !!(actions & ACTION_WEAPON),
+  };
+}
+
+function handleEvents(events) {
+  if (!events) return;
+  if (events & EVENT_SHOT) audio.shoot(world.state.player.weapon);
+  if (events & EVENT_PICKUP) audio.pickup();
+  if (events & EVENT_MISSION) audio.jingle();
+  if (events & EVENT_CRASH) audio.thud();
+  if (events & EVENT_DIED) {
+    audio.thud();
+    setScreen(SCREEN_OVER);
+  }
+  if (events & EVENT_BUSTED) {
+    audio.thud();
+    setScreen(SCREEN_BUSTED);
+  }
+}
+
+function frame(now) {
+  const dt = Math.min((now - lastTime) / 1000, MAX_FRAME);
+  lastTime = now;
+  const actions = input.takeActions();
+  handleActions(actions);
+  if (screen === SCREEN_PLAY || screen === SCREEN_TITLE) {
+    const gameInput = screen === SCREEN_PLAY ? buildGameInput(actions) : {
+      moveX: 0, moveY: 0, up: false, down: false, left: false, right: false, run: false,
+      interact: false, fire: false, firePressed: false, cycleWeapon: false,
+    };
+    accumulator += dt;
+    let guard = 0;
+    while (accumulator >= STEP && guard < 8) {
+      accumulator -= STEP;
+      guard += 1;
+      handleEvents(world.step(STEP, gameInput));
+    }
+    if (guard >= 8) accumulator = 0;
+    const p = world.state.player;
+    audio.engine(p.inCar ? Math.min(1, Math.abs(p.carSpeed) / 580) : 0, p.inCar);
+    audio.siren(world.state.siren < 0 ? -1 : Math.min(1, world.state.siren / 1200));
+    autosaveT -= dt;
+    if (autosaveT <= 0 || world.state.savePending) {
+      autosaveT = AUTOSAVE_EVERY;
+      saveGame(world);
+    }
+  }
+  renderer.draw(world, screen, { menuIndex, saveExists, muted });
+  window.requestAnimationFrame(frame);
+}
+
+if (shot) {
+  const staged = stageShot(shot, world);
+  renderer.draw(world, staged.screen, { menuIndex: 0, saveExists, muted });
+  renderer.draw(world, staged.screen, { menuIndex: 0, saveExists, muted });
+  window.__shotReady = true;
+} else {
+  world.reset();
+  setScreen(SCREEN_TITLE);
+  window.requestAnimationFrame(frame);
+}
