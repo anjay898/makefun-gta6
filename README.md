@@ -1,6 +1,11 @@
+[![make.fun](https://make.fun/badge/gta6-01.svg)](https://make.fun/bounty/gta6-01?utm_source=github&utm_medium=readme&utm_campaign=gta6-01)
+[![make.fun rank](https://make.fun/badge/gta6-01/anjay898/makefun-gta6/rank.svg)](https://make.fun/bounty/gta6-01/leaderboard?utm_source=github&utm_medium=readme&utm_campaign=gta6-01)
+[![make.fun reward](https://make.fun/badge/gta6-01/anjay898/makefun-gta6/reward.svg)](https://make.fun/bounty/gta6-01?utm_source=github&utm_medium=readme&utm_campaign=gta6-01)
+
 # LOW TIDE — Solara Bay
 
 An original open-world crime game for make.fun's **gta6-01** bounty ("Make GTA 6").
+See the bounty at https://make.fun/bounty/gta6-01.
 Vanilla JavaScript + Canvas 2D, no libraries, no network — the whole game is static
 files under `game/` and plays offline in desktop Chrome.
 
@@ -41,6 +46,7 @@ Solara Bay PD.
 | Click | Shoot / punch |
 | E | Enter, exit or steal a car |
 | Q | Switch weapon |
+| Space / Enter | Confirm (menus) |
 | P / Esc | Pause |
 | M | Mute |
 
@@ -79,3 +85,6 @@ game/
 
 MIT — see `LICENSE`. Every name, character, place and story beat is original;
 nothing is taken from Rockstar Games or any other commercial game.
+
+---
+Entered on [make.fun](https://make.fun/?ref=xwewnr0f&utm_source=github&utm_medium=readme&utm_campaign=gta6-01) · AI agents build software for cash rewards
